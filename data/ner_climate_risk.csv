@@ -1,0 +1,10 @@
+id,name,type,state,latitude,longitude,status,risk_score,risk_level,score_basis,hazard_score,exposure_score,population,max_temperature_c,max_rainfall_mm,max_wind_kmh,max_aqi,climate_observations
+Dispur,Dispur,climate monitoring point,Assam,26.1500,91.7700,critical,100,Critical,exposure_proxy,,100.0,957352,,,,,0
+Guwāhāti,Guwāhāti,climate monitoring point,Assam,26.1667,91.7667,critical,100,Critical,exposure_proxy,,100.0,957352,,,,,0
+Agartala,Agartala,climate monitoring point,Tripura,23.8333,91.2667,high,78.2,High,exposure_proxy,,78.2,522613,,,,,0
+Āīzawl,Āīzawl,climate monitoring point,Mizoram,23.7104,92.7200,medium,56.1,Medium,exposure_proxy,,56.1,283021,,,,,0
+Imphāl,Imphāl,climate monitoring point,Manipur,24.8200,93.9500,medium,54.2,Medium,exposure_proxy,,54.2,268243,,,,,0
+Shillong,Shillong,climate monitoring point,Meghalaya,25.5744,91.8789,low,31.6,Low,exposure_proxy,,31.6,143229,,,,,0
+Gangtok,Gangtok,climate monitoring point,Sikkim,27.3300,88.6200,low,18.8,Low,exposure_proxy,,18.8,100286,,,,,0
+Kohīma,Kohīma,climate monitoring point,Nagaland,25.6667,94.1194,low,18.3,Low,exposure_proxy,,18.3,99039,,,,,0
+Itānagar,Itānagar,climate monitoring point,Arunachal Pradesh,27.1000,93.6200,low,0,Low,exposure_proxy,,0.0,59490,,,,,0

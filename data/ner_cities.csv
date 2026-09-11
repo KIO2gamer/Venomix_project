@@ -1,0 +1,10 @@
+id,name,type,state,latitude,longitude,status,risk_score,last_updated
+dataset-53,Dispur,network feature,Assam,26.1500,91.7700,unknown,,
+dataset-54,Guwāhāti,network feature,Assam,26.1667,91.7667,unknown,,
+dataset-87,Agartala,network feature,Tripura,23.8333,91.2667,unknown,,
+dataset-150,Āīzawl,network feature,Mizoram,23.7104,92.7200,unknown,,
+dataset-156,Imphāl,network feature,Manipur,24.8200,93.9500,unknown,,
+dataset-177,Shillong,network feature,Meghalaya,25.5744,91.8789,unknown,,
+dataset-180,Gangtok,network feature,Sikkim,27.3300,88.6200,unknown,,
+dataset-181,Kohīma,network feature,Nagaland,25.6667,94.1194,unknown,,
+dataset-182,Itānagar,network feature,Arunachal Pradesh,27.1000,93.6200,unknown,,
