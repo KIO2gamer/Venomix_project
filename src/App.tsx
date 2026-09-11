@@ -25,6 +25,7 @@ import {
   Send,
   Truck,
   Upload,
+  Volume2,
   X,
 } from "lucide-react";
 
@@ -97,8 +98,6 @@ function App() {
       const response = await fetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, { method: "POST" });
       if (!response.ok) throw new Error("Acknowledge failed");
     } catch {
-      // Keep the alert open when the API cannot confirm the acknowledgement,
-      // otherwise the command centre shows a status the backend never stored.
       setDataError("The alert could not be acknowledged. Reconnect to the API and try again.");
       return;
     }
@@ -110,13 +109,10 @@ function App() {
     setReports((prev) => [report, ...prev.filter((item) => item.id !== report.id)]);
     setReportToast(`Field report ${report.id} received and added to the operations feed.`);
     window.setTimeout(() => setReportToast(""), 6000);
-    // Refresh the summary so dashboard counts reflect the new report.
     void loadSummary().then(setSummary);
   }
 
   useEffect(() => {
-    // Register the service worker up front so alert handling and the offline
-    // app shell are available even before the alerts tab is opened.
     void registerServiceWorker();
 
     void loadSummary().then(setSummary);
@@ -432,6 +428,8 @@ function EmergencyAlertPanel() {
   const [message, setMessage] = useState("Severe weather warning. Move to safe shelter and follow official instructions.");
   const [severity, setSeverity] = useState("high");
   const [towers, setTowers] = useState(12);
+  const [baud, setBaud] = useState(300);
+  const [broadcastingAudio, setBroadcastingAudio] = useState(false);
   const [result, setResult] = useState<{
     delivery_mode: string;
     channels: string[];
@@ -459,17 +457,25 @@ function EmergencyAlertPanel() {
       });
       if (!response.ok) throw new Error("Simulation failed");
       setResult(await response.json());
-      // Mirror the server alert on this device so a dropped connection does not
-      // hide the notification.
       void showLocalAlert(alertPayload);
     } catch {
-      // Offline / backend down: raise and queue a local on-device alert instead of failing.
       const shown = await showLocalAlert(alertPayload);
       setError(
         shown
           ? "Backend unreachable. The alert was delivered to this device and queued for other devices."
           : "Backend unreachable and notifications are not permitted on this device. The alert was queued."
       );
+    }
+  }
+
+  async function broadcastAudio() {
+    setBroadcastingAudio(true);
+    try {
+      await transmitAcousticAlert(`[${severity.toUpperCase()}] ${area}: ${message}`, baud);
+    } catch (err) {
+      console.error("Audio transmission failed:", err);
+    } finally {
+      setBroadcastingAudio(false);
     }
   }
 
@@ -498,13 +504,26 @@ function EmergencyAlertPanel() {
           <input type="range" min="0" max="50" value={towers} onChange={(event) => setTowers(Number(event.target.value))} />
         </label>
         <label>
+          Acoustic transmission rate (baud)
+          <select value={baud} onChange={(event) => setBaud(Number(event.target.value))}>
+            <option value={150}>150 Baud (Long range / noisy environments)</option>
+            <option value={300}>300 Baud (Standard audio FSK rate)</option>
+            <option value={600}>600 Baud (Fast transmission)</option>
+          </select>
+        </label>
+        <label>
           Message
           <textarea rows={4} value={message} onChange={(event) => setMessage(event.target.value)} />
         </label>
         {error && <p className="form-error">{error}</p>}
-        <button className="primary-button" onClick={() => void simulate()}>
-          <Radio size={16} /> Run delivery simulation
-        </button>
+        <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
+          <button className="primary-button" onClick={() => void simulate()}>
+            <Radio size={16} /> Run delivery simulation
+          </button>
+          <button className="primary-button" style={{ background: "#4e8cc5" }} disabled={broadcastingAudio} onClick={() => void broadcastAudio()}>
+            <Volume2 size={16} /> {broadcastingAudio ? "Transmitting tones..." : `Broadcast tones (${baud} baud)`}
+          </button>
+        </div>
       </div>
       <div className="panel emergency-result">
         {result ? (
@@ -576,8 +595,6 @@ function PushSetup() {
         setStatus("Notifications blocked in browser permissions");
         return;
       }
-      // A local permission grant is enough for offline alerts, even without
-      // the PushManager or a reachable backend.
       const hasPushManager = "serviceWorker" in navigator && "PushManager" in window;
       try {
         const reg = hasPushManager ? await navigator.serviceWorker.getRegistration("/sw.js") : undefined;
@@ -594,7 +611,7 @@ function PushSetup() {
           }
         }
       } catch {
-        // ignore - fall through to the permission-only status below
+        // ignore
       }
       if (Notification.permission === "granted") {
         setStatus(hasPushManager ? "Local alerts enabled (click Enable for server push)" : "Local alerts enabled (offline-capable)");
@@ -604,9 +621,8 @@ function PushSetup() {
     }
     void checkStatus();
 
- function goOnline() {
+    function goOnline() {
       setOnline(true);
-      // Connectivity is back: deliver anything raised while offline.
       void flushQueuedAlerts().then((count) => {
         if (count > 0) setTestResult(`Delivered ${count} queued alert(s) now that you are back online.`);
       });
@@ -633,8 +649,6 @@ function PushSetup() {
       return;
     }
 
-    // Step 1: always ensure the on-device permission + service worker, so
-    // alerts work offline even if the server push path is unavailable.
     setStatus("Requesting permission...");
     const granted = await ensurePermission();
     if (!granted) {
@@ -644,8 +658,6 @@ function PushSetup() {
     setStatus("Registering service worker...");
     const registration = await registerServiceWorker();
 
-    // Step 2: try the server push path (needs connectivity + a VAPID key).
-    // If it fails, keep the offline-capable local alerts instead of erroring out.
     if (!registration || !("PushManager" in window)) {
       setStatus("Local alerts enabled (offline-capable)");
       return;
@@ -666,7 +678,6 @@ function PushSetup() {
       }
 
       setStatus("Subscribing to push manager...");
-      // Clean up any stale subscription to avoid mismatched VAPID keys
       const existing = await registration.pushManager.getSubscription();
       if (existing) {
         try {
@@ -682,8 +693,6 @@ function PushSetup() {
       });
 
       setStatus("Syncing with backend...");
-      // The phone number is saved with the device so the backend can text the
-      // user if this device later goes offline and push can no longer reach it.
       const phoneNumber = normalizePhone(phone);
       const subscribeResponse = await fetch(`${API_BASE}/api/push/subscribe`, {
         method: "POST",
@@ -696,7 +705,7 @@ function PushSetup() {
         try {
           localStorage.setItem(PHONE_KEY, phoneNumber);
         } catch {
-          // Private mode: the number was still sent with the subscription.
+          // Private mode
         }
       }
       setStatus(phoneNumber ? "Enabled (push + SMS fallback)" : "Enabled (online + offline)");
@@ -716,7 +725,6 @@ function PushSetup() {
       if (data.sent > 0) {
         setTestResult(`Test alert delivered to ${data.sent} device(s)`);
       } else if (data.subscriptions === 0) {
-        // No server subscriptions, but we can still show the alert on this device.
         const shown = await showLocalAlert({
           title: "Test alert (local)",
           body: "Emergency broadcast notification delivery is operational on this device.",
@@ -727,7 +735,6 @@ function PushSetup() {
         setTestResult(`Push delivery: ${data.error ?? "Failed"}`);
       }
     } catch {
-      // Backend unreachable: still prove the offline path works.
       const shown = await showLocalAlert({
         title: "Test alert (offline)",
         body: "Backend unreachable, but on-device emergency notifications are working.",
@@ -739,7 +746,6 @@ function PushSetup() {
     }
   }
 
-  /** Save the phone number against the device already registered online. */
   async function savePhoneNumber() {
     const phoneNumber = normalizePhone(phone);
     if (!phoneNumber) {
@@ -763,7 +769,7 @@ function PushSetup() {
       try {
         localStorage.setItem(PHONE_KEY, phoneNumber);
       } catch {
-        // Private mode: the number is still stored on the server.
+        // Private mode
       }
       setStatus("Enabled (push + SMS fallback)");
       setTestResult(`Saved ${phoneNumber}. Alerts will be texted there if this device goes offline.`);
@@ -976,6 +982,52 @@ function ReportModal({ onClose, onSubmitted }: { onClose: () => void; onSubmitte
     } catch { setError("The API is unavailable. Start the backend and try again."); }
   }
   return <div className="modal-backdrop"><div className="modal"><button className="close-button" onClick={onClose}><X size={19} /></button>{sent ? <div className="success-state"><CheckCircle2 size={42} /><h2>Report queued</h2><p>Your incident was accepted by the field reports service.</p><button className="primary-button" onClick={onClose}>Done</button></div> : <><p className="eyebrow">FIELD UPDATE</p><h2>Report an incident</h2><p className="muted">Capture a road, bridge, weather, or delivery disruption.</p><label>Incident type<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="road">Road blockage</option><option value="safety">Landslide</option><option value="other">Flooding</option><option value="road">Bridge damage</option><option value="delivery">Delivery delay</option></select></label><label>Location<button type="button" className="location-input" onClick={captureLocation}><MapPin size={16} /> Use current location <span>{locating ? "Locating..." : location ? `${location[0].toFixed(4)}, ${location[1].toFixed(4)}` : "Not captured"}</span></button></label><label>Notes<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Describe what you see..." rows={3} /></label>{error && <p className="form-error">{error}</p>}<div className="modal-actions"><button className="ghost-button" onClick={onClose}>Cancel</button><button className="primary-button" onClick={() => void submitReport()}><Send size={16} /> Submit report</button></div></>}</div></div>;
+}
+
+/**
+ * Transmits an alert text string acoustically using audio frequency tones (FSK)
+ * @param text The message string to transmit
+ * @param baud Rate of symbol transmission (default 300 baud)
+ */
+async function transmitAcousticAlert(text: string, baud: number = 300) {
+  const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+  const bitDuration = 1 / baud;
+
+  const MARK_FREQ = 1200;
+  const SPACE_FREQ = 2200;
+
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text + "\\n");
+  const bits: number[] = [];
+
+  for (const byte of bytes) {
+    bits.push(0);
+    for (let i = 0; i < 8; i++) {
+      bits.push((byte >> i) & 1);
+    }
+    bits.push(1);
+  }
+
+  let startTime = audioCtx.currentTime + 0.1;
+
+  for (const bit of bits) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.value = bit === 1 ? MARK_FREQ : SPACE_FREQ;
+
+    gain.gain.setValueAtTime(0.3, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + bitDuration);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start(startTime);
+    osc.stop(startTime + bitDuration);
+
+    startTime += bitDuration;
+  }
 }
 
 export default App;
